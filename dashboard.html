@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Greetify Dashboard</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #000; color: #fff; height: 100vh;
+    display: flex; flex-direction: column;
+  }
+  header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 16px 28px; border-bottom: 1px solid #1c1c1e;
+  }
+  header h1 { font-size: 20px; font-weight: 600; }
+  #status {
+    font-size: 13px; padding: 6px 14px; border-radius: 999px;
+    background: #1c1c1e; color: #8e8e93;
+  }
+  #status.on { color: #30d158; }
+  main { flex: 1; display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; padding: 20px 28px; min-height: 0; }
+  .card { background: #111113; border-radius: 24px; padding: 24px; overflow: hidden; }
+  .label { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #8e8e93; margin-bottom: 14px; }
+
+  #camera { display: flex; flex-direction: column; }
+  #camera .box {
+    flex: 1; border-radius: 18px; background: #1c1c1e;
+    display: flex; align-items: center; justify-content: center; color: #636366;
+  }
+
+  #empty { text-align: center; color: #636366; margin-top: 80px; }
+  #popup { display: none; animation: pop .45s cubic-bezier(.2,.9,.3,1.2); }
+  @keyframes pop { from { opacity: 0; transform: translateY(24px) scale(.96); } to { opacity: 1; transform: none; } }
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: rgba(48,209,88,.15); color: #30d158;
+    padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 600;
+  }
+  #name { font-size: 38px; font-weight: 700; margin: 16px 0 4px; }
+  #phone { color: #8e8e93; margin-bottom: 22px; }
+  .row { padding: 14px 0; border-top: 1px solid #1c1c1e; }
+  .row small { display: block; color: #8e8e93; font-size: 12px; margin-bottom: 4px; }
+  .row span { font-size: 17px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+  .chip { background: #1c1c1e; padding: 6px 14px; border-radius: 999px; font-size: 14px; }
+  #history { margin-top: 20px; font-size: 13px; color: #8e8e93; }
+  #history div { padding: 4px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Greetify</h1>
+  <div id="status">Connecting...</div>
+</header>
+
+<main>
+  <section class="card" id="camera">
+    <div class="label">Live Camera</div>
+    <div class="box">Camera feed next step me aayega</div>
+  </section>
+
+  <section class="card">
+    <div class="label">Returning Customer</div>
+    <div id="empty">Waiting for a customer...</div>
+    <div id="popup">
+      <span class="badge">&#10003; Returning customer</span>
+      <div id="name"></div>
+      <div id="phone"></div>
+      <div class="row"><small>Last visit</small><span id="lastVisit"></span></div>
+      <div class="row"><small>Last bought</small><span id="lastBought"></span></div>
+      <div class="row"><small>Likes</small><div class="chips" id="likes"></div></div>
+    </div>
+    <div id="history"></div>
+  </section>
+</main>
+
+<script>
+const statusEl = document.getElementById("status");
+const popup = document.getElementById("popup");
+const empty = document.getElementById("empty");
+
+function fmtDate(iso) {
+  if (!iso) return "First time recorded";
+  return new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function showCustomer(c) {
+  empty.style.display = "none";
+  popup.style.display = "none";
+  void popup.offsetWidth;            // animation dobara chalane ke liye
+  popup.style.display = "block";
+
+  document.getElementById("name").textContent = c.name;
+  document.getElementById("phone").textContent = c.phone || "";
+  document.getElementById("lastVisit").textContent = fmtDate(c.last_visit);
+  document.getElementById("lastBought").textContent = c.last_purchase || "-";
+
+  const likes = document.getElementById("likes");
+  likes.innerHTML = "";
+  if (!c.preferences || c.preferences.length === 0) {
+    likes.textContent = "-";
+  } else {
+    c.preferences.forEach(p => {
+      const d = document.createElement("div");
+      d.className = "chip";
+      d.textContent = p;
+      likes.appendChild(d);
+    });
+  }
+
+  const h = document.createElement("div");
+  h.textContent = new Date().toLocaleTimeString() + "  -  " + c.name;
+  document.getElementById("history").prepend(h);
+
+  try { new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=").play(); } catch (e) {}
+}
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+
+  ws.onopen = () => {
+    statusEl.textContent = "Live";
+    statusEl.className = "on";
+    setInterval(() => ws.readyState === 1 && ws.send("ping"), 20000);
+  };
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === "returning_customer") showCustomer(msg.customer);
+  };
+  ws.onclose = () => {
+    statusEl.textContent = "Reconnecting...";
+    statusEl.className = "";
+    setTimeout(connect, 2000);   // server band hua to dobara judne ki koshish
+  };
+}
+connect();
+</script>
+</body>
+</html>

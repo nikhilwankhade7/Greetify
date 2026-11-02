@@ -113,3 +113,9 @@ def list_customers():
 if __name__ == "__main__":
     init_db()
     print("Database ready:", DB_PATH)
+def delete_customer(customer_id):
+    """Customer aur uski saari purchases hata do."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM purchases WHERE customer_id = ?", (customer_id,))
+        cur = conn.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
+        return cur.rowcount > 0
