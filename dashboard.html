@@ -5,105 +5,278 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Greetify Dashboard</title>
 <style>
+  :root {
+    --bg: #07070a; --card: rgba(255,255,255,.04); --line: rgba(255,255,255,.08);
+    --text: #f5f5f7; --muted: #8e8e93; --green: #30d158; --gold: #ffd60a; --red: #ff453a;
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-    background: #000; color: #fff; height: 100vh;
-    display: flex; flex-direction: column;
-  }
-  header {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 16px 28px; border-bottom: 1px solid #1c1c1e;
-  }
-  header h1 { font-size: 20px; font-weight: 600; }
-  #status {
-    font-size: 13px; padding: 6px 14px; border-radius: 999px;
-    background: #1c1c1e; color: #8e8e93;
-  }
-  #status.on { color: #30d158; }
-  main { flex: 1; display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; padding: 20px 28px; min-height: 0; }
-  .card { background: #111113; border-radius: 24px; padding: 24px; overflow: hidden; }
-  .label { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #8e8e93; margin-bottom: 14px; }
-
-  #camera { display: flex; flex-direction: column; }
-  #camera .box {
-    flex: 1; border-radius: 18px; background: #1c1c1e;
-    display: flex; align-items: center; justify-content: center; color: #636366;
+    font-family: -apple-system, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+    color: var(--text); height: 100vh; display: flex; flex-direction: column;
+    background: radial-gradient(900px 500px at 85% -10%, rgba(48,209,88,.12), transparent 60%),
+                radial-gradient(700px 400px at -5% 110%, rgba(10,132,255,.10), transparent 60%), var(--bg);
   }
 
-  #empty { text-align: center; color: #636366; margin-top: 80px; }
-  #popup { display: none; animation: pop .45s cubic-bezier(.2,.9,.3,1.2); }
-  @keyframes pop { from { opacity: 0; transform: translateY(24px) scale(.96); } to { opacity: 1; transform: none; } }
-  .badge {
-    display: inline-flex; align-items: center; gap: 8px;
-    background: rgba(48,209,88,.15); color: #30d158;
-    padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 600;
-  }
-  #name { font-size: 38px; font-weight: 700; margin: 16px 0 4px; }
-  #phone { color: #8e8e93; margin-bottom: 22px; }
-  .row { padding: 14px 0; border-top: 1px solid #1c1c1e; }
-  .row small { display: block; color: #8e8e93; font-size: 12px; margin-bottom: 4px; }
-  .row span { font-size: 17px; }
-  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
-  .chip { background: #1c1c1e; padding: 6px 14px; border-radius: 999px; font-size: 14px; }
-  #history { margin-top: 20px; font-size: 13px; color: #8e8e93; }
-  #history div { padding: 4px 0; }
+  /* ---------- Header ---------- */
+  header { display: flex; justify-content: space-between; align-items: center; padding: 16px 28px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 700; letter-spacing: -.02em; }
+  .logo { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font-size: 16px;
+          background: linear-gradient(135deg, #30d158, #0a84ff); }
+  .right { display: flex; align-items: center; gap: 14px; }
+  #clock { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+  #status { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 7px 14px;
+            border-radius: 999px; background: var(--card); border: 1px solid var(--line); color: var(--muted); }
+  #status i { width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
+  #status.on { color: var(--green); }
+  #status.on i { background: var(--green); animation: pulse 1.8s infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(48,209,88,.6); } 100% { box-shadow: 0 0 0 9px rgba(48,209,88,0); } }
+
+  /* ---------- Layout ---------- */
+  main { flex: 1; display: grid; grid-template-columns: 1.25fr 1fr; gap: 20px; padding: 4px 28px 24px; min-height: 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 26px;
+          backdrop-filter: blur(20px); padding: 22px; min-height: 0; }
+  .label { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+
+  /* ---------- Camera ---------- */
+  #camera { display: flex; flex-direction: column; gap: 14px; }
+  .camhead { display: flex; justify-content: space-between; align-items: center; }
+  .livebadge { font-size: 11px; font-weight: 700; letter-spacing: .08em; padding: 4px 10px; border-radius: 999px;
+               background: rgba(255,69,58,.15); color: var(--red); display: flex; align-items: center; gap: 6px; }
+  .livebadge i { width: 6px; height: 6px; border-radius: 50%; background: var(--red); animation: blink 1.2s infinite; }
+  @keyframes blink { 50% { opacity: .2; } }
+  .video { flex: 1; border-radius: 20px; overflow: hidden; background: #0d0d10; border: 1px solid var(--line);
+           display: grid; place-items: center; min-height: 0; }
+  .video img { width: 100%; height: 100%; object-fit: contain; }
+  #recent { display: flex; gap: 8px; overflow-x: auto; min-height: 34px; align-items: center; }
+  .pill { white-space: nowrap; font-size: 13px; padding: 7px 14px; border-radius: 999px;
+          background: rgba(255,255,255,.06); border: 1px solid var(--line); color: #d1d1d6; }
+  .pill small { color: var(--muted); margin-left: 6px; }
+  #recentEmpty { color: #48484a; font-size: 13px; }
+
+  /* ---------- Customer panel ---------- */
+  #panel { display: flex; flex-direction: column; overflow-y: auto; gap: 16px; }
+  #panel::-webkit-scrollbar, #recent::-webkit-scrollbar { width: 0; height: 0; }
+
+  #empty { flex: 1; display: grid; place-items: center; text-align: center; color: #48484a; }
+  .ring { width: 86px; height: 86px; border-radius: 50%; margin: 0 auto 18px; border: 2px solid #2c2c2e;
+          display: grid; place-items: center; font-size: 30px; position: relative; }
+  .ring::after { content: ""; position: absolute; inset: -2px; border-radius: 50%; border: 2px solid var(--green);
+                 animation: ping 2.2s infinite; opacity: 0; }
+  @keyframes ping { 0% { transform: scale(1); opacity: .6; } 100% { transform: scale(1.6); opacity: 0; } }
+
+  #popup { display: none; flex-direction: column; gap: 16px; animation: rise .5s cubic-bezier(.2,.9,.3,1.1); }
+  @keyframes rise { from { opacity: 0; transform: translateY(26px) scale(.97); } to { opacity: 1; transform: none; } }
+
+  .who { display: flex; align-items: center; gap: 16px; }
+  .avatar { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; font-size: 24px; font-weight: 700;
+            background: linear-gradient(135deg, #30d158, #0a84ff); color: #000; flex-shrink: 0; }
+  #name { font-size: 28px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1; }
+  #phone { color: var(--muted); font-size: 14px; margin-top: 4px; }
+  .badge { display: inline-block; margin-top: 8px; font-size: 11px; font-weight: 700; letter-spacing: .05em;
+           padding: 4px 10px; border-radius: 999px; background: rgba(48,209,88,.15); color: var(--green); }
+
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .tile { background: rgba(255,255,255,.05); border-radius: 16px; padding: 14px; }
+  .tile small { display: block; font-size: 11px; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; margin-bottom: 6px; }
+  .tile b { font-size: 16px; font-weight: 600; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { background: rgba(48,209,88,.12); color: #8ef0a8; padding: 5px 12px; border-radius: 999px; font-size: 13px; }
+
+  .section { background: rgba(255,255,255,.03); border: 1px solid var(--line); border-radius: 18px; padding: 16px; }
+  .section .label { margin-bottom: 10px; }
+  .hist { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .hist:last-child { border-bottom: none; padding-bottom: 0; }
+  .hist:first-of-type { padding-top: 0; }
+  .hist .t { font-size: 15px; }
+  .hist .d { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .hist .a { color: var(--green); font-weight: 600; font-size: 15px; white-space: nowrap; margin-left: 12px; }
+  .nohist { color: #636366; font-size: 14px; }
+
+  /* ---------- Action ---------- */
+  #action { background: linear-gradient(160deg, rgba(48,209,88,.10), rgba(255,255,255,.03));
+            border: 1px solid rgba(48,209,88,.22); border-radius: 20px; padding: 18px; }
+  #action h3 { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+  .stage { display: none; }
+  .stage.on { display: block; animation: rise .35s ease; }
+  .btns { display: flex; gap: 10px; }
+  button { flex: 1; padding: 13px; border: none; border-radius: 14px; font-size: 15px; font-weight: 600; cursor: pointer;
+           color: var(--text); background: rgba(255,255,255,.09); transition: transform .12s, background .2s; font-family: inherit; }
+  button:hover { background: rgba(255,255,255,.14); }
+  button:active { transform: scale(.97); }
+  button.primary { background: var(--green); color: #04130a; }
+  button.primary:hover { background: #3be26a; }
+  button.gold { background: linear-gradient(135deg, #ffd60a, #ff9f0a); color: #1a1200; }
+  .btns.second { margin-top: 10px; }
+  input { width: 100%; padding: 13px 14px; margin-bottom: 10px; border-radius: 14px; border: 1px solid var(--line);
+          background: rgba(0,0,0,.4); color: var(--text); font-size: 15px; outline: none; font-family: inherit; }
+  input:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(48,209,88,.15); }
+  #coStatus { color: #d1d1d6; font-size: 15px; line-height: 1.5; margin-bottom: 14px; }
+  .doneico { font-size: 34px; margin-bottom: 6px; }
+  #doneText { color: #d1d1d6; line-height: 1.5; }
+
+  /* ---------- Toast ---------- */
+  #toast { position: fixed; bottom: 28px; left: 50%; transform: translate(-50%, 90px); background: #1c1c1e;
+           border: 1px solid var(--line); padding: 13px 22px; border-radius: 999px; font-size: 14px;
+           transition: transform .4s cubic-bezier(.2,.9,.3,1.2); z-index: 9; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+  #toast.show { transform: translate(-50%, 0); }
+  #toast.err { color: var(--red); }
+
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; overflow-y: auto; } .video { min-height: 260px; } }
 </style>
 </head>
 <body>
+
 <header>
-  <h1>Greetify</h1>
-  <div id="status">Connecting...</div>
+  <div class="brand"><div class="logo">&#128075;</div>Greetify</div>
+  <div class="right">
+    <div id="clock"></div>
+    <div id="status"><i></i><span>Connecting</span></div>
+  </div>
 </header>
 
 <main>
+  <!-- LEFT: camera -->
   <section class="card" id="camera">
-    <div class="label">Live Camera</div>
-    <div class="box">Camera feed next step me aayega</div>
+    <div class="camhead">
+      <div class="label">Live camera</div>
+      <div class="livebadge"><i></i>LIVE</div>
+    </div>
+    <div class="video"><img src="/video" alt=""></div>
+    <div>
+      <div class="label" style="margin-bottom:8px">Today's visitors</div>
+      <div id="recent"><span id="recentEmpty">No visitors yet</span></div>
+    </div>
   </section>
 
-  <section class="card">
-    <div class="label">Returning Customer</div>
-    <div id="empty">Waiting for a customer...</div>
-    <div id="popup">
-      <span class="badge">&#10003; Returning customer</span>
-      <div id="name"></div>
-      <div id="phone"></div>
-      <div class="row"><small>Last visit</small><span id="lastVisit"></span></div>
-      <div class="row"><small>Last bought</small><span id="lastBought"></span></div>
-      <div class="row"><small>Likes</small><div class="chips" id="likes"></div></div>
+  <!-- RIGHT: customer -->
+  <section class="card" id="panel">
+    <div id="empty">
+      <div>
+        <div class="ring">&#128100;</div>
+        <div style="font-size:17px;color:#8e8e93">Waiting for a customer</div>
+        <div style="font-size:13px;margin-top:6px">Pop-up appears automatically</div>
+      </div>
     </div>
-    <div id="history"></div>
+
+    <div id="popup">
+      <div class="who">
+        <div class="avatar" id="avatar"></div>
+        <div>
+          <div id="name"></div>
+          <div id="phone"></div>
+          <span class="badge">&#10003; RETURNING CUSTOMER</span>
+        </div>
+      </div>
+
+      <div class="tiles">
+        <div class="tile"><small>Last visit</small><b id="lastVisit"></b></div>
+        <div class="tile"><small>Likes</small><div class="chips" id="likes"></div></div>
+      </div>
+
+      <div class="section">
+        <div class="label">Purchase history</div>
+        <div id="history"></div>
+      </div>
+
+      <div id="action">
+        <!-- Step 1 -->
+        <div class="stage on" id="sAsk">
+          <h3>Did the customer buy something?</h3>
+          <div class="btns">
+            <button class="primary" onclick="showForm()">Yes</button>
+            <button onclick="saidNo()">No</button>
+          </div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="stage" id="sForm">
+          <h3>What did they buy?</h3>
+          <input id="item" placeholder="Item (e.g. Black hoodie)">
+          <input id="amount" placeholder="Amount (e.g. 1499, 1.5k, 2L)">
+          <div class="btns">
+            <button class="primary" onclick="savePurchase()">Save</button>
+            <button class="gold" onclick="startCheckout()">&#127903; Scratch card</button>
+          </div>
+          <div class="btns second"><button onclick="resetAction()">Cancel</button></div>
+        </div>
+
+        <!-- Step 3: checkout -->
+        <div class="stage" id="sCheckout">
+          <h3>Customer payment</h3>
+          <div id="coStatus"></div>
+          <div class="btns">
+            <button id="coPaid" class="primary" style="display:none" onclick="confirmPay()">Payment received</button>
+            <button onclick="cancelCheckout()">Cancel</button>
+          </div>
+        </div>
+
+        <!-- Done -->
+        <div class="stage" id="sDone">
+          <div class="doneico" id="doneIco">&#9989;</div>
+          <div id="doneText"></div>
+        </div>
+      </div>
+    </div>
   </section>
 </main>
 
-<script>
-const statusEl = document.getElementById("status");
-const popup = document.getElementById("popup");
-const empty = document.getElementById("empty");
+<div id="toast"></div>
 
-function fmtDate(iso) {
-  if (!iso) return "First time recorded";
-  return new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
+<script>
+const $ = (id) => document.getElementById(id);
+let currentId = null;
+
+/* ---------- helpers ---------- */
+const inr = (n) => "Rs " + Number(n).toLocaleString("en-IN");
+
+function fmtDate(iso, withTime = true) {
+  if (!iso) return "First visit";
+  const o = { day: "numeric", month: "short", year: "numeric" };
+  if (withTime) { o.hour = "numeric"; o.minute = "2-digit"; }
+  return new Date(iso).toLocaleString("en-IN", o);
 }
 
-function showCustomer(c) {
-  empty.style.display = "none";
-  popup.style.display = "none";
-  void popup.offsetWidth;            // animation dobara chalane ke liye
-  popup.style.display = "block";
+function parseAmount(text) {
+  let t = text.trim().toLowerCase().replace(/[,\u20b9\s]/g, "").replace(/^rs\.?/, "");
+  let m = 1;
+  if (t.endsWith("cr")) { m = 1e7; t = t.slice(0, -2); }
+  else if (t.endsWith("lakh")) { m = 1e5; t = t.slice(0, -4); }
+  else if (t.endsWith("l")) { m = 1e5; t = t.slice(0, -1); }
+  else if (t.endsWith("k")) { m = 1e3; t = t.slice(0, -1); }
+  const n = parseFloat(t);
+  return isNaN(n) ? null : Math.round(n * m * 100) / 100;
+}
 
-  document.getElementById("name").textContent = c.name;
-  document.getElementById("phone").textContent = c.phone || "";
-  document.getElementById("lastVisit").textContent = fmtDate(c.last_visit);
-  document.getElementById("lastBought").textContent = c.last_purchase || "-";
+let toastTimer;
+function toast(text, isErr = false) {
+  const t = $("toast");
+  t.textContent = text;
+  t.className = "show" + (isErr ? " err" : "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (t.className = ""), 3200);
+}
 
-  const likes = document.getElementById("likes");
+function setStage(id) {
+  document.querySelectorAll(".stage").forEach((s) => s.classList.remove("on"));
+  $(id).classList.add("on");
+}
+
+setInterval(() => ($("clock").textContent = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })), 1000);
+
+/* ---------- render ---------- */
+function renderCustomer(c) {
+  currentId = c.id;
+  $("name").textContent = c.name;
+  $("phone").textContent = c.phone || "";
+  $("avatar").textContent = (c.name || "?").trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+  $("lastVisit").textContent = fmtDate(c.last_visit, false);
+
+  const likes = $("likes");
   likes.innerHTML = "";
-  if (!c.preferences || c.preferences.length === 0) {
-    likes.textContent = "-";
+  if (!c.preferences || !c.preferences.length) {
+    likes.innerHTML = '<span class="nohist">-</span>';
   } else {
-    c.preferences.forEach(p => {
+    c.preferences.forEach((p) => {
       const d = document.createElement("div");
       d.className = "chip";
       d.textContent = p;
@@ -111,33 +284,30 @@ function showCustomer(c) {
     });
   }
 
-  const h = document.createElement("div");
-  h.textContent = new Date().toLocaleTimeString() + "  -  " + c.name;
-  document.getElementById("history").prepend(h);
-
-  try { new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=").play(); } catch (e) {}
+  const h = $("history");
+  h.innerHTML = "";
+  if (!c.history || !c.history.length) {
+    h.innerHTML = '<div class="nohist">No purchases yet. This could be their first!</div>';
+    return;
+  }
+  c.history.forEach((x) => {
+    const row = document.createElement("div");
+    row.className = "hist";
+    const left = document.createElement("div");
+    const t = document.createElement("div");
+    t.className = "t"; t.textContent = x.item;
+    const d = document.createElement("div");
+    d.className = "d"; d.textContent = fmtDate(x.purchased_at, false);
+    left.append(t, d);
+    const a = document.createElement("div");
+    a.className = "a"; a.textContent = x.amount ? inr(x.amount) : "";
+    row.append(left, a);
+    h.appendChild(row);
+  });
 }
 
-function connect() {
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${proto}://${location.host}/ws`);
-
-  ws.onopen = () => {
-    statusEl.textContent = "Live";
-    statusEl.className = "on";
-    setInterval(() => ws.readyState === 1 && ws.send("ping"), 20000);
-  };
-  ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-    if (msg.type === "returning_customer") showCustomer(msg.customer);
-  };
-  ws.onclose = () => {
-    statusEl.textContent = "Reconnecting...";
-    statusEl.className = "";
-    setTimeout(connect, 2000);   // server band hua to dobara judne ki koshish
-  };
-}
-connect();
-</script>
-</body>
-</html>
+function addRecent(name) {
+  const box = $("recent");
+  const empty = $("recentEmpty");
+  if (empty) empty.remove();
+  const p = document.createElement("div"); 

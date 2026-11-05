@@ -237,6 +237,15 @@ while True:
         smooth.clear()
         frame = draw_pill(frame, "Looking for a face", frame.shape[1] // 2, 24,
                           WHITE, False, 0)
+        if frame_count % 2 == 0:
+        try:
+            small_out = cv2.resize(frame, (640, 480))
+            ok, buf = cv2.imencode(".jpg", small_out, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            if ok:
+                requests.post(f"{SERVER_URL}/frame", data=buf.tobytes(), timeout=0.3)
+        except requests.RequestException:
+            pass
+    frame_count += 1
 
     cv2.imshow("Greetify - Recognition", frame)
     if cv2.waitKey(1) & 0xFF == ord("q"):

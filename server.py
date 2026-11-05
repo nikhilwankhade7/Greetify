@@ -1,3 +1,6 @@
+import asyncio
+from fastapi import Request
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.responses import FileResponse
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -81,3 +84,21 @@ def home():
 @app.get("/dashboard")
 def dashboard():
     return FileResponse("dashboard.html")
+latest_frame = {"jpg": None}
+
+
+@app.post("/frame")
+async def receive_frame(request: Request):
+    latest_frame["jpg"] = await request.body()
+    return {"ok": True}
+
+
+@app.get("/video")
+async def video():
+    async def stream():
+        while True:
+            jpg = latest_frame["jpg"]
+            if jpg:
+                yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n")
+            await asyncio.sleep(0.05)
+    return StreamingResponse(stream(), media_type="multipart/x-mixed-replace; boundary=frame")
