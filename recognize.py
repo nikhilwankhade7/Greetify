@@ -4,22 +4,21 @@ import cv2
 import face_recognition
 import numpy as np
 import requests
-
-SERVER_URL = "http://127.0.0.1:8000"
 import db
 
 # ================= SETTINGS =================
 TOLERANCE = 0.5
 COOLDOWN_SECONDS = 60
 SCAN_TIME = 2.0
+SERVER_URL = "http://127.0.0.1:8000"
 
 WHITE = (255, 255, 255)          # BGR colors
-GREEN = (89, 199, 52)            # iOS green
-AMBER = (10, 159, 255)           # iOS orange
+GREEN = (89, 199, 52)
+AMBER = (10, 159, 255)
 PILL_BG = (40, 40, 40)
 FONT = cv2.FONT_HERSHEY_DUPLEX
 
-# ============ DATABASE (pehle jaisa) ============
+# ============ DATABASE ============
 db.init_db()
 known_encodings, known_ids, known_names = db.load_known_faces()
 print(f"Loaded {len(known_encodings)} encodings for {len(set(known_ids))} customer(s)")
@@ -56,14 +55,12 @@ def blend(frame, overlay, alpha):
 
 
 def draw_corners(frame, cx, cy, size, color, thickness=3):
-    """Face ID jaise gol kone wale brackets."""
     half = int(size / 2)
     x1, y1, x2, y2 = cx - half, cy - half, cx + half, cy + half
-    r = max(int(size * 0.12), 8)       # kone ka gol-pan
-    L = max(int(size * 0.14), 10)      # seedhi line ki lambai
+    r = max(int(size * 0.12), 8)
+    L = max(int(size * 0.14), 10)
     aa = cv2.LINE_AA
 
-    # (arc center, arc start-end angle, line1 start->end, line2 start->end)
     cv2.ellipse(frame, (x1 + r, y1 + r), (r, r), 0, 180, 270, color, thickness, aa)
     cv2.line(frame, (x1, y1 + r), (x1, y1 + r + L), color, thickness, aa)
     cv2.line(frame, (x1 + r, y1), (x1 + r + L, y1), color, thickness, aa)
@@ -82,7 +79,6 @@ def draw_corners(frame, cx, cy, size, color, thickness=3):
 
 
 def draw_dots(frame, pts, progress, color):
-    """Halke dots jo scan ke saath dheere-dheere ubharte hain."""
     if not pts:
         return frame
     overlay = frame.copy()
@@ -93,19 +89,17 @@ def draw_dots(frame, pts, progress, color):
 
 
 def draw_scan_line(frame, cx, cy, size, elapsed):
-    """Box ke andar upar-neeche chalti naram line (fade ke saath)."""
     half = int(size / 2)
     x1, x2 = cx - half + 8, cx + half - 8
     k = 0.5 - 0.5 * math.cos(elapsed / 1.0 * math.pi)
     y = int(cy - half + size * k)
     overlay = frame.copy()
-    for i, a in enumerate([1.0, 0.6, 0.35, 0.18]):     # peeche fade hoti trail
+    for i in range(4):
         cv2.line(overlay, (x1, y - i * 4), (x2, y - i * 4), WHITE, 2, cv2.LINE_AA)
     return blend(frame, overlay, 0.45)
 
 
 def draw_pill(frame, text, center_x, y, color, show_check, check_progress):
-    """Neeche gol dark pill, uske andar (optional) checkmark + text."""
     scale, th = 0.7, 1
     (tw, thh), _ = cv2.getTextSize(text, FONT, scale, th)
     icon_w = 34 if show_check else 0
@@ -126,7 +120,6 @@ def draw_pill(frame, text, center_x, y, color, show_check, check_progress):
     if show_check:
         ccx, ccy = x1 + pad + 10, y1 + r
         cv2.circle(frame, (ccx, ccy), 11, color, -1, cv2.LINE_AA)
-        # checkmark dheere-dheere banta hai
         p1, p2, p3 = (ccx - 5, ccy), (ccx - 1, ccy + 4), (ccx + 6, ccy - 4)
         if check_progress > 0:
             m = min(1.0, check_progress * 2)
@@ -148,7 +141,8 @@ face_locations = []
 face_points = []
 face_labels = []
 scan_start = None
-smooth = {}    # har chehre ka smooth box: {index: (cx, cy, size)}
+smooth = {}
+frame_count = 0
 
 while True:
     ret, frame = cap.read()
@@ -156,7 +150,7 @@ while True:
         break
     frame = cv2.flip(frame, 1)
 
-    # ---------- PEHCHAAN (pehle jaisa) ----------
+    # ---------- PEHCHAAN ----------
     if process_this_frame:
         small = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
         rgb_small = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
@@ -204,7 +198,6 @@ while True:
             tcx, tcy = (left + right) // 2, (top + bottom) // 2
             tsize = max(right - left, bottom - top) * 1.35
 
-            # smooth movement (jhatka kam)
             if i in smooth:
                 pcx, pcy, ps = smooth[i]
                 cx = pcx + (tcx - pcx) * 0.35
@@ -218,7 +211,6 @@ while True:
             known = label[1] is not None
             color = WHITE if not done else (GREEN if known else AMBER)
 
-            # brackets shuru me "andar se bahar" phailte hain
             grow = 0.85 + 0.15 * ease_out(elapsed / 0.5)
             draw_corners(frame, cx, cy, size_i * grow, color)
 
@@ -231,13 +223,15 @@ while True:
                 check_p = ease_out((elapsed - SCAN_TIME) / 0.5)
                 text = f"Welcome back, {label[0]}" if known else "New Customer"
                 frame = draw_pill(frame, text, cx, cy + size_i / 2 + 18,
-                                  color, True if known else False, check_p)
+                                  color, known, check_p)
     else:
         scan_start = None
         smooth.clear()
         frame = draw_pill(frame, "Looking for a face", frame.shape[1] // 2, 24,
                           WHITE, False, 0)
-        if frame_count % 2 == 0:
+
+    # ---------- DASHBOARD KO VIDEO BHEJO ----------
+    if frame_count % 2 == 0:
         try:
             small_out = cv2.resize(frame, (640, 480))
             ok, buf = cv2.imencode(".jpg", small_out, [cv2.IMWRITE_JPEG_QUALITY, 70])
