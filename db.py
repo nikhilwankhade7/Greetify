@@ -77,7 +77,7 @@ def update_last_visit(customer_id):
 
 
 def get_customer_info(customer_id):
-    """Pop-up ke liye saari jaankari: naam, last visit, pichli khareedari, favourite items."""
+    """Pop-up ke liye saari jaankari: naam, last visit, history, favourite items."""
     with get_conn() as conn:
         c = conn.execute(
             "SELECT id, name, phone, last_visit FROM customers WHERE id = ?", (customer_id,)
@@ -85,10 +85,10 @@ def get_customer_info(customer_id):
         if c is None:
             return None
 
-        last = conn.execute(
-            "SELECT item, purchased_at FROM purchases WHERE customer_id = ? "
-            "ORDER BY purchased_at DESC LIMIT 1", (customer_id,)
-        ).fetchone()
+        history = conn.execute(
+            "SELECT item, amount, purchased_at FROM purchases WHERE customer_id = ? "
+            "ORDER BY purchased_at DESC, id DESC LIMIT 5", (customer_id,)
+        ).fetchall()
 
         top = conn.execute(
             "SELECT item, COUNT(*) AS n FROM purchases WHERE customer_id = ? "
@@ -100,22 +100,7 @@ def get_customer_info(customer_id):
         "name": c["name"],
         "phone": c["phone"],
         "last_visit": c["last_visit"],
-        "last_purchase": last["item"] if last else None,
+        "last_purchase": history[0]["item"] if history else None,
+        "history": [dict(r) for r in history],
         "preferences": [r["item"] for r in top],
     }
-
-
-def list_customers():
-    with get_conn() as conn:
-        return [dict(r) for r in conn.execute("SELECT id, name, phone FROM customers")]
-
-
-if __name__ == "__main__":
-    init_db()
-    print("Database ready:", DB_PATH)
-def delete_customer(customer_id):
-    """Customer aur uski saari purchases hata do."""
-    with get_conn() as conn:
-        conn.execute("DELETE FROM purchases WHERE customer_id = ?", (customer_id,))
-        cur = conn.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
-        return cur.rowcount > 0

@@ -1,4 +1,5 @@
 import asyncio
+import json
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
@@ -13,10 +14,20 @@ class PurchaseIn(BaseModel):
     amount: float = 0
 
 
-# ---------- WebSocket ----------
+class ItemIn(BaseModel):
+    item: str
+    amount: float = 0
+
+
+class CartIn(BaseModel):
+    items: list[ItemIn]
+
+
+# ---------- Live messages (SSE + WebSocket dono) ----------
 class ConnectionManager:
     def __init__(self):
-        self.connections = []
+        self.connections = []   # WebSocket clients
+        self.queues = []        # SSE clients
 
     async def connect(self, ws: WebSocket):
         await ws.accept()
@@ -27,14 +38,40 @@ class ConnectionManager:
             self.connections.remove(ws)
 
     async def broadcast(self, message: dict):
+        data = json.dumps(message)
+        for q in list(self.queues):
+            q.put_nowait(data)
         for ws in list(self.connections):
             try:
-                await ws.send_json(message)
+                await ws.send_text(data)
             except Exception:
                 self.disconnect(ws)
 
 
 manager = ConnectionManager()
+
+
+@app.get("/events")
+async def events():
+    q = asyncio.Queue()
+    manager.queues.append(q)
+
+    async def gen():
+        try:
+            yield "retry: 2000\n\n"
+            yield ": connected\n\n"
+            while True:
+                try:
+                    data = await asyncio.wait_for(q.get(), timeout=15)
+                    yield f"data: {data}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+        finally:
+            if q in manager.queues:
+                manager.queues.remove(q)
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.websocket("/ws")
@@ -43,7 +80,7 @@ async def websocket_endpoint(ws: WebSocket):
     try:
         while True:
             await ws.receive_text()
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, Exception):
         manager.disconnect(ws)
 
 
@@ -95,6 +132,13 @@ def add_purchase(customer_id: int, p: PurchaseIn):
     return {"ok": True}
 
 
+@app.post("/customers/{customer_id}/purchases/bulk")
+def add_purchases_bulk(customer_id: int, cart: CartIn):
+    for it in cart.items:
+        db.add_purchase(customer_id, it.item, it.amount)
+    return {"ok": True, "count": len(cart.items)}
+
+
 # ---------- Live video ----------
 latest_frame = {"jpg": None}
 
@@ -121,28 +165,33 @@ pending_checkouts = {}
 
 
 @app.post("/customers/{customer_id}/checkout")
-async def start_checkout(customer_id: int, p: PurchaseIn):
+async def start_checkout(customer_id: int, cart: CartIn):
     info = db.get_customer_info(customer_id)
     if info is None:
         return {"ok": False, "error": "Customer not found"}
+    if not cart.items:
+        return {"ok": False, "error": "No items"}
 
-    if p.amount < db.MIN_BILL:
+    bill = round(sum(i.amount for i in cart.items), 2)
+    if bill < db.MIN_BILL:
         offer = db.make_offer("none", 0)
     elif db.purchase_count(customer_id) == 0:
         offer = db.welcome_offer()
     else:
         offer = db.spin_wheel(customer_id)
 
-    discount = db.calc_discount(p.amount, offer["percent"])
+    discount = db.calc_discount(bill, offer["percent"])
     scratch = offer["type"] != "none"
     pending_checkouts[customer_id] = {
-        "item": p.item, "bill": p.amount, "percent": offer["percent"],
-        "discount": discount, "final": round(p.amount - discount, 2),
+        "items": [{"item": i.item, "amount": i.amount} for i in cart.items],
+        "item": ", ".join(i.item for i in cart.items),
+        "bill": bill, "percent": offer["percent"],
+        "discount": discount, "final": round(bill - discount, 2),
         "kind": offer["type"], "tier": offer.get("tier"),
         "scratch": scratch, "revealed": False,
     }
     await manager.broadcast({"type": "checkout_started", "cid": customer_id,
-                             "name": info["name"], "bill": p.amount, "scratch": scratch})
+                             "name": info["name"], "bill": bill, "scratch": scratch})
     return {"ok": True, "scratch": scratch}
 
 
@@ -168,8 +217,14 @@ async def confirm(customer_id: int):
         return {"ok": False, "error": "No active checkout"}
     if co["scratch"] and not co["revealed"]:
         return {"ok": False, "error": "Customer ne abhi scratch nahi kiya"}
-    db.add_purchase(customer_id, co["item"], co["final"],
-                    co["percent"] if co["discount"] > 0 else 0, co["discount"])
+
+    # discount har item me uski keemat ke hisaab se baant do
+    for it in co["items"]:
+        share = co["discount"] * it["amount"] / co["bill"] if co["bill"] else 0
+        paid = round(it["amount"] - share, 2)
+        db.add_purchase(customer_id, it["item"], paid,
+                        co["percent"] if co["discount"] > 0 else 0, round(share, 2))
+
     pending_checkouts.pop(customer_id, None)
     await manager.broadcast({"type": "checkout_done", "cid": customer_id})
     return {"ok": True, **co}
