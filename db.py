@@ -1,8 +1,21 @@
 import sqlite3
+import random
 import numpy as np
 from datetime import datetime
 
 DB_PATH = "greetify.db"
+
+# ---------- Discount settings ----------
+WELCOME_PERCENT = 10
+MIN_BILL = 999
+MAX_DISCOUNT_RS = 500
+
+# (discount %, chance weight)  -> weights ka total 100
+SPIN_TABLES = {
+    "Regular": [(0, 24), (3, 30), (5, 25), (8, 12), (10, 6), (15, 2), (20, 1)],
+    "Silver":  [(0, 14), (3, 25), (5, 30), (8, 15), (10, 10), (15, 5), (20, 1)],
+    "Gold":    [(0, 9),  (3, 20), (5, 30), (8, 20), (10, 12), (15, 8), (20, 1)],
+}
 
 
 def get_conn():
@@ -34,10 +47,17 @@ def init_db():
                 FOREIGN KEY (customer_id) REFERENCES customers(id)
             )
         """)
+    # purani table me naye columns jodo (pehle se ho to ignore)
+    for col in ("discount_percent REAL DEFAULT 0", "discount_amount REAL DEFAULT 0"):
+        try:
+            with get_conn() as conn:
+                conn.execute(f"ALTER TABLE purchases ADD COLUMN {col}")
+        except sqlite3.OperationalError:
+            pass
 
 
+# ---------- Customers ----------
 def add_customer(name, phone, encodings):
-    """Naya customer save karo. encodings = chehre ke numbers ki list."""
     blob = np.array(encodings, dtype=np.float64).tobytes()
     now = datetime.now().isoformat(timespec="seconds")
     with get_conn() as conn:
@@ -49,7 +69,6 @@ def add_customer(name, phone, encodings):
 
 
 def load_known_faces():
-    """Saare customers ke chehre load karo. Return: encodings, ids, names (teeno parallel lists)."""
     encodings, ids, names = [], [], []
     with get_conn() as conn:
         for row in conn.execute("SELECT id, name, encodings FROM customers"):
@@ -61,19 +80,40 @@ def load_known_faces():
     return encodings, ids, names
 
 
-def add_purchase(customer_id, item, amount):
-    now = datetime.now().isoformat(timespec="seconds")
+def list_customers():
     with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO purchases (customer_id, item, amount, purchased_at) VALUES (?, ?, ?, ?)",
-            (customer_id, item, amount, now),
-        )
+        return [dict(r) for r in conn.execute("SELECT id, name, phone FROM customers")]
 
 
 def update_last_visit(customer_id):
     now = datetime.now().isoformat(timespec="seconds")
     with get_conn() as conn:
         conn.execute("UPDATE customers SET last_visit = ? WHERE id = ?", (now, customer_id))
+
+
+def delete_customer(customer_id):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM purchases WHERE customer_id = ?", (customer_id,))
+        cur = conn.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
+        return cur.rowcount > 0
+
+
+# ---------- Purchases ----------
+def add_purchase(customer_id, item, amount, discount_percent=0, discount_amount=0):
+    now = datetime.now().isoformat(timespec="seconds")
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO purchases (customer_id, item, amount, purchased_at, "
+            "discount_percent, discount_amount) VALUES (?, ?, ?, ?, ?, ?)",
+            (customer_id, item, amount, now, discount_percent, discount_amount),
+        )
+
+
+def purchase_count(customer_id):
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM purchases WHERE customer_id = ?", (customer_id,)
+        ).fetchone()[0]
 
 
 def get_customer_info(customer_id):
@@ -87,7 +127,7 @@ def get_customer_info(customer_id):
 
         history = conn.execute(
             "SELECT item, amount, purchased_at FROM purchases WHERE customer_id = ? "
-            "ORDER BY purchased_at DESC, id DESC LIMIT 5", (customer_id,)
+            "ORDER BY purchased_at DESC, id DESC LIMIT 40", (customer_id,)
         ).fetchall()
 
         top = conn.execute(
@@ -104,3 +144,45 @@ def get_customer_info(customer_id):
         "history": [dict(r) for r in history],
         "preferences": [r["item"] for r in top],
     }
+
+
+# ---------- Lucky discount ----------
+def get_tier(count):
+    if count >= 6:
+        return "Gold"
+    if count >= 3:
+        return "Silver"
+    return "Regular"
+
+
+def make_offer(kind, percent, tier=None):
+    return {"type": kind, "percent": percent, "tier": tier,
+            "min_bill": MIN_BILL, "max_discount": MAX_DISCOUNT_RS}
+
+
+def welcome_offer():
+    return make_offer("welcome", WELCOME_PERCENT)
+
+
+def spin_wheel(customer_id):
+    tier = get_tier(purchase_count(customer_id))
+    table = SPIN_TABLES[tier]
+    percent = random.choices([p for p, _ in table], weights=[w for _, w in table])[0]
+    return make_offer("lucky", percent, tier)
+
+
+def calc_discount(bill, percent):
+    if percent <= 0 or bill < MIN_BILL:
+        return 0.0
+    return round(min(bill * percent / 100, MAX_DISCOUNT_RS), 2)
+
+
+def expected_discount(tier):
+    table = SPIN_TABLES[tier]
+    total = sum(w for _, w in table)
+    return sum(p * w for p, w in table) / total
+
+
+if __name__ == "__main__":
+    init_db()
+    print("Database ready:", DB_PATH)

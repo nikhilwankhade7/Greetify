@@ -4,6 +4,15 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 import db
+import logging
+
+
+class _HideFrameLogs(logging.Filter):
+    def filter(self, record):
+        return "/frame" not in record.getMessage()
+
+
+logging.getLogger("uvicorn.access").addFilter(_HideFrameLogs())
 
 app = FastAPI(title="Greetify API")
 db.init_db()
@@ -21,6 +30,24 @@ class ItemIn(BaseModel):
 
 class CartIn(BaseModel):
     items: list[ItemIn]
+
+
+class UnknownIn(BaseModel):
+    encodings: list[list[float]]
+
+
+class RegisterIn(BaseModel):
+    name: str
+    phone: str = ""
+    consent: bool = False
+
+
+# consent ka record rakhne ke liye column (pehle se ho to ignore)
+try:
+    with db.get_conn() as _c:
+        _c.execute("ALTER TABLE customers ADD COLUMN consent_at TEXT")
+except Exception:
+    pass
 
 
 # ---------- Live messages (SSE + WebSocket dono) ----------
@@ -137,6 +164,79 @@ def add_purchases_bulk(customer_id: int, cart: CartIn):
     for it in cart.items:
         db.add_purchase(customer_id, it.item, it.amount)
     return {"ok": True, "count": len(cart.items)}
+
+
+# ---------- Naya customer register ----------
+pending_new = {"encodings": None}
+
+
+@app.post("/unknown")
+async def unknown(u: UnknownIn):
+    if len(u.encodings) < 2:
+        return {"ok": False, "error": "Kam samples"}
+    pending_new["encodings"] = u.encodings
+    await manager.broadcast({"type": "new_customer"})
+    return {"ok": True}
+
+
+@app.post("/unknown/skip")
+async def unknown_skip():
+    pending_new["encodings"] = None
+    return {"ok": True}
+
+
+@app.post("/register")
+async def register(r: RegisterIn):
+    name = r.name.strip()
+    phone = "".join(ch for ch in r.phone if ch.isdigit() or ch == "+")
+    if not r.consent:
+        return {"ok": False, "error": "Customer ki permission zaroori hai"}
+    if not name:
+        return {"ok": False, "error": "Naam likho"}
+    if phone and len(phone) < 10:
+        return {"ok": False, "error": "Phone number 10 digit ka hona chahiye"}
+    if not pending_new["encodings"]:
+        return {"ok": False, "error": "Chehra nahi mila, customer ko camera ke saamne laao"}
+
+    cid = db.add_customer(name, phone, pending_new["encodings"])
+    from datetime import datetime
+    with db.get_conn() as c:
+        c.execute("UPDATE customers SET consent_at = ? WHERE id = ?",
+                  (datetime.now().isoformat(timespec="seconds"), cid))
+    pending_new["encodings"] = None
+    return {"ok": True, "customer": db.get_customer_info(cid)}
+
+
+# ---------- Aaj ki report ----------
+@app.get("/stats/today")
+def stats_today():
+    from datetime import datetime
+    today = datetime.now().date().isoformat() + "%"
+    with db.get_conn() as c:
+        try:
+            row = c.execute(
+                "SELECT COUNT(*) AS items, COALESCE(SUM(amount),0) AS sales, "
+                "COALESCE(SUM(discount_amount),0) AS disc, COUNT(DISTINCT customer_id) AS buyers "
+                "FROM purchases WHERE purchased_at LIKE ?", (today,)).fetchone()
+        except Exception:
+            row = c.execute(
+                "SELECT COUNT(*) AS items, COALESCE(SUM(amount),0) AS sales, 0 AS disc, "
+                "COUNT(DISTINCT customer_id) AS buyers FROM purchases WHERE purchased_at LIKE ?",
+                (today,)).fetchone()
+        top = c.execute(
+            "SELECT item, COUNT(*) AS n, COALESCE(SUM(amount),0) AS total FROM purchases "
+            "WHERE purchased_at LIKE ? GROUP BY item ORDER BY n DESC, total DESC LIMIT 5",
+            (today,)).fetchall()
+        visitors = c.execute(
+            "SELECT COUNT(*) FROM customers WHERE last_visit LIKE ?", (today,)).fetchone()[0]
+        new_customers = c.execute(
+            "SELECT COUNT(*) FROM customers WHERE created_at LIKE ?", (today,)).fetchone()[0]
+    return {
+        "visitors": visitors, "new_customers": new_customers, "buyers": row["buyers"],
+        "items": row["items"], "sales": round(row["sales"], 2),
+        "discount": round(row["disc"], 2),
+        "top_items": [dict(r) for r in top],
+    }
 
 
 # ---------- Live video ----------

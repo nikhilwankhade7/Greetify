@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Greetify Pay</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "SF Pro Display", "Segoe UI", Roboto, sans-serif; color: #f5f5f7;
+         min-height: 100vh; display: flex; align-items: center; justify-content: center; text-align: center;
+         background: radial-gradient(800px 500px at 80% -10%, rgba(48,209,88,.14), transparent 60%),
+                     radial-gradient(600px 400px at -5% 110%, rgba(10,132,255,.12), transparent 60%), #07070a; }
+  #idle { color: #636366; font-size: 22px; }
+  #idle .wave { font-size: 56px; margin-bottom: 12px; }
+  #stage { display: none; width: min(92vw, 440px); animation: rise .5s ease; }
+  @keyframes rise { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
+  h2 { font-size: 30px; font-weight: 700; letter-spacing: -.02em; margin-bottom: 6px; }
+  .sub { color: #8e8e93; margin-bottom: 22px; line-height: 1.5; }
+  #card { position: relative; width: 100%; height: 230px; border-radius: 28px; overflow: hidden;
+          background: linear-gradient(160deg, #0f2a19, #14281b); border: 1px solid #1f3d2a;
+          box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+  #under { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 12px; }
+  #big { font-size: 56px; font-weight: 800; color: #30d158; }
+  #big.jackpot { color: #ffd60a; animation: glow 1s infinite alternate; }
+  @keyframes glow { to { text-shadow: 0 0 26px #ffd60a; } }
+  #small { color: #8e8e93; margin-top: 8px; font-size: 15px; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+  #pay { margin-top: 24px; font-size: 24px; font-weight: 700; opacity: 0; transition: opacity .6s; }
+  #pay.show { opacity: 1; }
+  #pay span { color: #30d158; }
+</style>
+</head>
+<body>
+
+<div id="idle"><div class="wave">&#128075;</div>Welcome to our store</div>
+
+<div id="stage">
+  <h2 id="hello"></h2>
+  <div class="sub" id="sub"></div>
+  <div id="card">
+    <div id="under"><div id="big">?</div><div id="small"></div></div>
+    <canvas id="foil"></canvas>
+  </div>
+  <div id="pay"></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const canvas = $("foil"), ctx = canvas.getContext("2d");
+let cid = null, result = null, drawing = false, finished = false;
+
+function initFoil() {
+  const r = canvas.getBoundingClientRect();
+  canvas.width = r.width; canvas.height = r.height;
+  canvas.style.display = "block";
+  ctx.globalCompositeOperation = "source-over";
+  const g = ctx.createLinearGradient(0, 0, r.width, r.height);
+  g.addColorStop(0, "#9a9aa0"); g.addColorStop(.5, "#e5e5ea"); g.addColorStop(1, "#9a9aa0");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, r.width, r.height);
+  ctx.fillStyle = "#3a3a3c"; ctx.font = "bold 26px sans-serif"; ctx.textAlign = "center";
+  ctx.fillText("Scratch here", r.width / 2, r.height / 2 + 9);
+}
+
+function fillResult(r) {
+  const big = $("big");
+  big.className = r.percent === 20 ? "jackpot" : "";
+  if (r.percent > 0) {
+    big.textContent = r.percent === 20 ? "JACKPOT 20% OFF!" : r.percent + "% OFF";
+    big.style.fontSize = r.percent === 20 ? "34px" : "56px";
+    $("small").textContent = "You save Rs " + Number(r.discount).toLocaleString("en-IN");
+  } else {
+    big.textContent = "Better luck next time";
+    big.style.fontSize = "24px";
+    $("small").textContent = r.scratch ? "" : "Lucky scratch unlocks on bills of Rs 999+";
+  }
+  $("pay").innerHTML = "Bill Rs " + Number(r.bill).toLocaleString("en-IN") +
+    " &rarr; Pay <span>Rs " + Number(r.final).toLocaleString("en-IN") + "</span>";
+}
+
+async function ensureResult() {
+  if (result) return;
+  result = await (await fetch("/checkout/" + cid + "/reveal", { method: "POST" })).json();
+  fillResult(result);
+}
+
+function finish() {
+  if (finished) return;
+  finished = true;
+  canvas.style.display = "none";
+  $("pay").classList.add("show");
+  fetch("/checkout/" + cid + "/shown", { method: "POST" });
+}
+
+function scratch(e) {
+  const r = canvas.getBoundingClientRect();
+  ctx.globalCompositeOperation = "destination-out";
+  ctx.beginPath();
+  ctx.arc(e.clientX - r.left, e.clientY - r.top, 28, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function clearedRatio() {
+  const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  let c = 0, n = 0;
+  for (let i = 3; i < d.length; i += 16) { n++; if (d[i] === 0) c++; }
+  return c / n;
+}
+
+canvas.addEventListener("pointerdown", (e) => { drawing = true; ensureResult(); scratch(e); });
+canvas.addEventListener("pointermove", (e) => { if (drawing) scratch(e); });
+addEventListener("pointerup", () => {
+  drawing = false;
+  if (result && !finished && clearedRatio() > 0.45) finish();
+});
+
+async function startStage(m) {
+  cid = m.cid; result = null; finished = false;
+  $("idle").style.display = "none";
+  $("stage").style.display = "block";
+  $("pay").classList.remove("show"); $("pay").textContent = "";
+  $("big").textContent = "?"; $("big").className = ""; $("small").textContent = "";
+  $("hello").textContent = "Hi, " + m.name + "!";
+  if (m.scratch) {
+    $("sub").textContent = "Your bill is Rs " + Number(m.bill).toLocaleString("en-IN") +
+      ". Scratch the card to reveal your lucky discount!";
+    initFoil();
+  } else {
+    $("sub").textContent = "";
+    canvas.style.display = "none";
+    await ensureResult();
+    finish();
+  }
+}
+
+function backToIdle(text, delay) {
+  if (text) { $("hello").textContent = text; $("sub").textContent = ""; }
+  setTimeout(() => { $("stage").style.display = "none"; $("idle").style.display = "block"; }, delay);
+}
+
+function connect() {
+  const es = new EventSource("/events");
+  es.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.type === "checkout_started") startStage(m);
+    if (m.type === "checkout_done" && m.cid === cid) backToIdle("Thank you! See you again", 4000);
+    if (m.type === "checkout_cancelled" && m.cid === cid) backToIdle("", 0);
+  };
+}
+connect();
+</script>
+</body>
+</html>
