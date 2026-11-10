@@ -151,6 +151,7 @@
   .day .hist:last-child { border-bottom:none; padding-bottom:2px; }
 
   /* ======== DAILY REPORT ======== */
+  a.rbtn { display:inline-flex; align-items:center; text-decoration:none; color:var(--text); cursor:pointer; }
   .rbtn { flex:none; padding:8px 16px; font-size:13px; border-radius:999px; background:rgba(255,255,255,.08); border:1px solid var(--line); }
   #report { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.6); backdrop-filter:blur(8px); z-index:20; padding:20px; }
   #report.on { display:flex; animation:rise .3s ease; }
@@ -187,6 +188,7 @@
 <header>
   <div class="brand"><div class="logo">&#128075;</div>Greetify</div>
   <div class="right">
+    <a class="rbtn" href="/logout">&#128274; Logout</a>
     <button class="rbtn" onclick="openCusts()">&#128101; Customers</button>
     <button class="rbtn" onclick="openReport()">&#128202; Today's report</button>
     <div id="clock"></div>
@@ -336,6 +338,13 @@
 <div id="toast"></div>
 
 <script>
+// Session khatam ho jaye to login page par bhej do
+const _fetch = window.fetch;
+window.fetch = async (...args) => {
+  const r = await _fetch(...args);
+  if (r.status === 401) location.href = "/login";
+  return r;
+};
 const $ = (id) => document.getElementById(id);
 let currentId = null;
 

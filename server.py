@@ -1,12 +1,24 @@
 import asyncio
+import hashlib
+import hmac
 import json
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
-import db
 import logging
+import os
+import secrets
+import time
+from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
+                               RedirectResponse, StreamingResponse)
+from pydantic import BaseModel
+from starlette.requests import HTTPConnection
+import db
 
+# ================= LOGIN SETTINGS =================
+# Apna password yahan badlo (ya GREETIFY_PASSWORD environment variable me rakho)
+DASHBOARD_PASSWORD = os.environ.get("GREETIFY_PASSWORD", "greetify123")
+SESSION_DAYS = 7
 
+# /frame ki lines terminal me na aayein
 class _HideFrameLogs(logging.Filter):
     def filter(self, record):
         return "/frame" not in record.getMessage()
@@ -14,7 +26,132 @@ class _HideFrameLogs(logging.Filter):
 
 logging.getLogger("uvicorn.access").addFilter(_HideFrameLogs())
 
-app = FastAPI(title="Greetify API")
+# Secret key file (pehli baar apne aap banti hai, isse server restart par login bana rehta hai)
+SECRET_FILE = "secret.key"
+if os.path.exists(SECRET_FILE):
+    SECRET = open(SECRET_FILE).read().strip()
+else:
+    SECRET = secrets.token_hex(32)
+    with open(SECRET_FILE, "w") as _f:
+        _f.write(SECRET)
+
+
+def make_token():
+    exp = int(time.time()) + SESSION_DAYS * 86400
+    sig = hmac.new(SECRET.encode(), str(exp).encode(), hashlib.sha256).hexdigest()
+    return f"{exp}.{sig}"
+
+
+def token_ok(token):
+    try:
+        exp, sig = (token or "").split(".", 1)
+        good = hmac.new(SECRET.encode(), exp.encode(), hashlib.sha256).hexdigest()
+        return hmac.compare_digest(sig, good) and int(exp) > time.time()
+    except Exception:
+        return False
+
+
+class NeedLogin(Exception):
+    pass
+
+
+OPEN_PATHS = {"/login", "/logout", "/"}
+
+
+async def require_auth(conn: HTTPConnection):
+    path = conn.url.path
+    if path in OPEN_PATHS:
+        return
+    # recognize.py isi computer se chalta hai, use login nahi chahiye
+    internal = path.startswith("/alert/") or path in ("/frame", "/unknown")
+    if internal and conn.client and conn.client.host in ("127.0.0.1", "::1"):
+        return
+    if token_ok(conn.cookies.get("gsid")):
+        return
+    raise NeedLogin()
+
+
+app = FastAPI(title="Greetify API", dependencies=[Depends(require_auth)],
+              docs_url=None, redoc_url=None, openapi_url=None)
+
+
+@app.exception_handler(NeedLogin)
+async def need_login_handler(request: Request, exc: NeedLogin):
+    if request.url.path in ("/dashboard", "/pay"):
+        return RedirectResponse("/login")
+    return JSONResponse({"error": "login required"}, status_code=401)
+
+
+LOGIN_PAGE = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Greetify Login</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,"SF Pro Display","Segoe UI",Roboto,sans-serif;color:#f5f5f7;min-height:100vh;display:grid;place-items:center;
+background:radial-gradient(900px 500px at 85% -10%,rgba(48,209,88,.16),transparent 60%),radial-gradient(700px 400px at -5% 110%,rgba(10,132,255,.14),transparent 60%),#07070a}
+.box{width:min(92vw,380px);padding:34px 30px;border-radius:28px;background:linear-gradient(180deg,rgba(255,255,255,.07),rgba(255,255,255,.03));
+border:1px solid rgba(255,255,255,.1);box-shadow:0 30px 80px rgba(0,0,0,.5);text-align:center}
+.logo{width:56px;height:56px;margin:0 auto 14px;border-radius:17px;display:grid;place-items:center;font-size:28px;background:linear-gradient(135deg,#30d158,#0a84ff);box-shadow:0 10px 30px rgba(48,209,88,.35)}
+h1{font-size:26px;letter-spacing:-.02em}p{color:#8e8e93;font-size:14px;margin:6px 0 22px}
+input{width:100%;padding:14px;border-radius:14px;border:1px solid rgba(255,255,255,.1);background:rgba(0,0,0,.45);color:#f5f5f7;font-size:16px;outline:none;text-align:center;letter-spacing:.1em}
+input:focus{border-color:#30d158;box-shadow:0 0 0 4px rgba(48,209,88,.16)}
+button{width:100%;margin-top:12px;padding:14px;border:none;border-radius:14px;font-size:16px;font-weight:600;cursor:pointer;color:#04130a;background:linear-gradient(135deg,#34d65c,#28b84d);box-shadow:0 8px 24px rgba(48,209,88,.3)}
+#err{color:#ff453a;font-size:14px;min-height:20px;margin-top:12px}
+</style></head><body>
+<div class="box"><div class="logo">&#128075;</div><h1>Greetify</h1><p>Dukaandaar login</p>
+<input id="pw" type="password" placeholder="Password" autofocus>
+<button onclick="go()">Login</button><div id="err"></div></div>
+<script>
+const pw=document.getElementById("pw"),err=document.getElementById("err");
+pw.addEventListener("keydown",e=>{if(e.key==="Enter")go()});
+async function go(){
+  err.textContent="";
+  try{
+    const r=await fetch("/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:pw.value})});
+    const d=await r.json();
+    if(d.ok){location.href="/dashboard";}else{err.textContent=d.error||"Galat password";pw.select();}
+  }catch(e){err.textContent="Server chal raha hai?";}
+}
+</script></body></html>"""
+
+failed_logins = {}   # ip -> (galat koshish, lock hone ka time)
+
+
+class LoginIn(BaseModel):
+    password: str
+
+
+@app.get("/login")
+def login_page():
+    return HTMLResponse(LOGIN_PAGE)
+
+
+@app.post("/login")
+async def login(body: LoginIn, request: Request):
+    ip = request.client.host if request.client else "?"
+    tries, until = failed_logins.get(ip, (0, 0))
+    if until > time.time():
+        return {"ok": False, "error": "Bahut galat koshish. 1 minute baad try karo."}
+    if hmac.compare_digest(body.password.encode(), DASHBOARD_PASSWORD.encode()):
+        failed_logins.pop(ip, None)
+        resp = JSONResponse({"ok": True})
+        resp.set_cookie("gsid", make_token(), max_age=SESSION_DAYS * 86400,
+                        httponly=True, samesite="lax")
+        return resp
+    tries += 1
+    failed_logins[ip] = (tries, time.time() + 60 if tries >= 5 else 0)
+    if tries >= 5:
+        failed_logins[ip] = (0, time.time() + 60)
+    return {"ok": False, "error": "Galat password"}
+
+
+@app.get("/logout")
+def logout():
+    resp = RedirectResponse("/login")
+    resp.delete_cookie("gsid")
+    return resp
+
 db.init_db()
 
 
